@@ -1,0 +1,340 @@
+/**
+  ******************************************************************************
+  * @file    GPIO/GPIO_IOToggle/Src/main.c
+  * @author  MCD Application Team
+  * @version V1.1.3
+  * @date    13-November-2015
+  * @brief   This exabmple describes how to configure and use GPIOs through
+  *          the STM32F4xx HAL API.
+  ******************************************************************************
+  * @attention
+  *
+  * <h2><center>&copy; COPYRIGHT(c) 2015 STMicroelectronics</center></h2>
+  *
+  * Redistribution and use in source and binary forms, with or without modification,
+  * are permitted provided that the following conditions are met:
+  *   1. Redistributions of source code must retain the above copyright notice,
+  *      this list of conditions and the following disclaimer.
+  *   2. Redistributions in binary form must reproduce the above copyright notice,
+  *      this list of conditions and the following disclaimer in the documentation
+  *      and/or other materials provided with the distribution.
+  *   3. Neither the name of STMicroelectronics nor the names of its contributors
+  *      may be used to endorse or promote products derived from this software
+  *      without specific prior written permission.
+  *
+  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+  * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+  * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+  * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+  * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+  * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+  *
+  ******************************************************************************
+  */
+/*Adaptado por Sauer para uso dos alunos da Fundação Liberato*/
+/* Includes ------------------------------------------------------------------*/
+
+
+#include "stm32f4xx.h"
+#include <stdio.h>
+#include <string.h>
+#include "LCD.h"
+#include "imagem.h"
+//#include "grafic.h"
+
+int rx=0, estado=0, fim=0;
+int cont_buff=0, buffer1[50];
+int points = 0, lifes = 3;
+
+//BLUETOOTH
+
+void config_serial6(void){
+	RCC->APB2ENR |= RCC_APB2ENR_USART6EN;
+	GPIOC->MODER |= 0XA000;
+	GPIOC->AFR[0] = 0X88000000;
+	USART6->CR1 |= USART_CR1_TE | USART_CR1_RE | USART_CR1_RXNEIE | USART_CR1_UE;
+	USART6->BRR |= (104<<4);
+	NVIC_SetPriority(USART6_IRQn, 2);
+	NVIC_EnableIRQ(USART6_IRQn);
+}
+
+void manda_serial6(int a){
+	while(!((USART6->SR)&0x80)){}; //aguarda 0buffer li0berar
+	USART6->DR = a;
+}
+
+void USART6_IRQHandler(void){
+    if (USART6->SR & 0x20){//USART_GetITStatus(USART2, USART_IT_RXNE)) {
+
+    	rx = USART6->DR;
+
+		if(rx=='s')
+		{
+			GPIOB->ODR ^= (1<<0);
+			rx=0;
+		}
+
+		if(rx=='q')
+		{
+			points++;
+			rx=0;
+		}
+
+		if(rx=='m')
+		{
+			lifes++;
+			rx=0;
+		}
+
+		if(rx=='b')
+		{
+			lifes--;
+			rx=0;
+		}
+
+		if(rx=='z')
+		{
+			lifes=0;
+			points=0;
+			rx=0;
+		}
+
+
+		rx=0;
+    }
+
+	USART6->SR &= ~(0x20);
+}
+
+//----------------------------------------------------------------------------------//
+
+void init_adc(void){
+   // Configurando clocks ADC
+	RCC->APB2ENR|=0x100;	//habilita ADC1
+   //RCC->APB2ENR|=RCC_APB2ENR_ADC1EN ;   //habilita clock bloco ADC
+    /*    Modulo conversor AD deve ter clock mÃ¡ximo de 36MHz
+    *  Operacao tipica em 30 MHz
+    *  Como clock processador no APB2 Ã© de 16MHz
+    *  Fator de divisao ajustado para 1  */
+	ADC1->CR1&=0xFCFF1FFF;	//resolução 12 bits modo descontínuo
+	ADC1->CR2&=0xFFFFF0FD;	//justificado a direita
+	ADC1->CR2|=0x01;	//ADON
+	ADC1->SQR1|=1<<20;	//número de canais a serem convertidos
+	ADC1->SQR3=0x00;	//canal zero
+	// ADC1->SQR3=0x01;	//canal um
+
+
+	RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
+	          // Configura pino do respectivo canal como analogico
+	GPIOA->MODER|=0xF;	//canal A0 e A1 analógico
+}
+
+int get_adc(void)
+{
+	ADC1->CR2|=1<<30;//inicia a conversão
+	return ADC1->DR;
+}
+
+
+void config_serial(void) {
+//configurando a porta serial assincrona
+RCC->APB1ENR |= 0x20000; //habilita clock usart 2
+GPIOA->MODER |= 0xA0; //Configurando Pino A2 e A3 como função alternativa
+GPIOA->AFR[0] |= 0x07700; //ativando a função alternativa usart2 nos pinos PA2 e PA3
+USART2->CR1 |= 0x202C; //0x200C; ativando interrupção recepção
+USART2->CR2 = 0;
+USART2->CR3 = 0;
+USART2->BRR |= (104 << 4); //16MHz/(16*9600);
+NVIC_SetPriority(USART2_IRQn, 1);
+NVIC_EnableIRQ(USART2_IRQn);
+}
+
+void config_tim10(void){
+	RCC->APB2ENR |= (1<<17);
+	TIM10->PSC = 3999;
+	TIM10->ARR = 3999;
+	TIM10->CNT = 0;
+	TIM10->CR1 |= 0X01;
+}
+
+
+
+
+void USART2_IRQHandler(void) {
+
+if (USART2->SR & 0x20) { //USART_GetITStatus(USART2, USART_IT_RXNE)) {
+rx = USART2->DR;
+}
+  /* if(rx=='l' || rx=='L')
+   {
+	   GPIOB->ODR = (1<<8);
+	   rx = 0;
+   }
+
+   if(rx=='r' || rx=='R')
+   {
+	   GPIOB->ODR = (1<<0);
+	   rx = 0;
+   }
+
+*/
+		if(rx=='s')
+		{
+			GPIOB->ODR ^= (1<<0);
+			rx=0;
+		}
+
+		if(rx=='q')
+		{
+			points++;
+			rx=0;
+		}
+
+		if(rx=='m')
+		{
+			lifes++;
+			rx=0;
+		}
+
+		if(rx=='b')
+		{
+			lifes--;
+			rx=0;
+		}
+
+		if(rx=='z')
+		{
+			lifes=0;
+			points=0;
+			rx=0;
+		}
+
+
+
+
+USART2->SR &= ~(0x20);
+
+}
+
+void manda_serial(int tx) {
+while (!((USART2->SR) & 0x80)) {}; //aguarda 0buffer li0berar
+USART2->DR = tx;
+}
+
+
+
+
+
+int main(void)
+{
+//int i, uni, a, b='1';
+
+RCC->AHB1ENR=0x00000087; //habilita o clock das portas
+GPIOA->MODER=0xA8000400; //configura PA5 como saída
+GPIOA->OTYPER=0x00; //saídas push-pull
+GPIOA->OSPEEDR=0x00; //velocidade transição lenta
+
+GPIOB->MODER=0x10001;
+GPIOB->PUPDR=0x40;
+
+GPIOC->PUPDR=0x1000000;
+
+
+
+config_tim10();
+//config_serial();
+config_serial6();
+init_adc();
+LCD5110_init();
+
+int Vrx=0;
+int i=0;
+int flag_aux=0;
+
+   while (1)
+  {
+
+	   Vrx = get_adc();
+
+	   if(Vrx < 1900) //teste se o joystick esta para a esquerda
+	   {
+		   flag_aux=1;
+
+	   	do{
+	   		manda_serial('e');
+	   		manda_serial6('e');
+
+	   		//LCD5110_clear();
+	   		LCD5110_set_XY(0, 1);
+	   		printf("esquerda       ");
+
+	   		Vrx = get_adc();
+	   		if(Vrx < 1900)
+	   		{
+	   			flag_aux = 1;
+	   		}else {flag_aux = 0;}
+	   		for(i=0;i<10000;i++){};
+	   	}while(flag_aux == 1);
+
+	   }
+
+	   if(Vrx > 2300) //teste se o joystick esta para a direita
+	   {
+		   flag_aux=1;
+
+	   	do{
+	   		manda_serial('d');
+	   		manda_serial6('d');
+
+	   		//LCD5110_clear();
+	   		LCD5110_set_XY(0, 1);
+	   		printf("direita        ");
+
+	   		Vrx = get_adc();
+	   		if(Vrx > 2300)
+	   		{
+	   			flag_aux = 1;
+	   		}else {flag_aux = 0;}
+	   		for(i=0;i<10000;i++){};
+	   	}while(flag_aux == 1);
+
+	   }
+
+	   if(((GPIOC-> IDR) & (1<<12))==0) //teste se o joystick foi pressionado
+	   {
+		   manda_serial('f');
+		   manda_serial6('f');
+
+		  // LCD5110_clear();
+		   LCD5110_set_XY(0, 1);
+		   printf ("Botao apertado       ");
+	   }
+
+	   else // joystick no centro
+	   {
+		   LCD5110_clear();
+		   LCD5110_set_XY(0, 1);
+		   printf ("Use o joystick         ");
+		   manda_serial('@');
+		   manda_serial6('@');
+		   for(i=0;i<10000;i++){};
+	   }
+
+
+
+	   LCD5110_set_XY(0, 3);
+	   printf ("points: %d",points);
+
+	   LCD5110_set_XY(0, 5);
+	   printf ("lifes: %d", lifes);
+
+
+	   rx = 0;
+
+
+  }
+}
